@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>3D Double Pendulum VR</title>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      canvas { display: block; }
+      #ui { position: absolute; top: 10px; left: 10px; z-index: 1; color: white; }
+      button { font-size: 16px; margin: 5px; padding: 10px; }
+    </style>
+  </head>
+  <body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
+
+    <div id="ui">
+      <button id="toggleZ">Aktif Et Z Eksenini</button>
+      <button id="toggleTrail">Aktif Et İz Bırakma</button>
+    </div>
+
+    <script>
+      // === Temel sahne ayarları ===
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+      document.body.appendChild(THREE.VRButton.createButton(renderer));
+
+      // === Işık ===
+      const light = new THREE.PointLight(0xffffff, 1);
+      light.position.set(5, 5, 5);
+      scene.add(light);
+
+      // === Çift sarkaç parametreleri ===
+      let L1 = 1.0, L2 = 1.0;
+      let m1 = 1.0, m2 = 1.0;
+      let a1 = Math.PI / 2, a2 = Math.PI / 2;
+      let a1_v = 0, a2_v = 0;
+      const g = 9.81;
+
+      // === Görseller (çubuklar ve kütleler) ===
+      const rod1 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, L1, 12), new THREE.MeshStandardMaterial({ color: 0x0077ff }));
+      const rod2 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, L2, 12), new THREE.MeshStandardMaterial({ color: 0xff7700 }));
+      const bob1 = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 16), new THREE.MeshStandardMaterial({ color: 0x00ffff }));
+      const bob2 = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffff00 }));
+
+      scene.add(rod1, rod2, bob1, bob2);
+
+      // === Kamera konumu ===
+      camera.position.z = 3;
+      camera.position.y = 1;
+
+      // === Fizik hesabı ===
+      function updatePendulum(dt) {
+        const num1 = -g * (2 * m1 + m2) * Math.sin(a1);
+        const num2 = -m2 * g * Math.sin(a1 - 2 * a2);
+        const num3 = -2 * Math.sin(a1 - a2) * m2 * (a2_v * a2_v * L2 + a1_v * a1_v * L1 * Math.cos(a1 - a2));
+        const den = L1 * (2 * m1 + m2 - m2 * Math.cos(2 * a1 - 2 * a2));
+        const a1_a = (num1 + num2 + num3) / den;
+
+        const num4 = 2 * Math.sin(a1 - a2) * (a1_v * a1_v * L1 * (m1 + m2) + g * (m1 + m2) * Math.cos(a1) + a2_v * a2_v * L2 * m2 * Math.cos(a1 - a2));
+        const den2 = L2 * (2 * m1 + m2 - m2 * Math.cos(2 * a1 - 2 * a2));
+        const a2_a = num4 / den2;
+
+        a1_v += a1_a * dt;
+        a2_v += a2_a * dt;
+        a1 += a1_v * dt;
+        a2 += a2_v * dt;
+      }
+
+      // === Z eksenini aktif etme ===
+      let zMovementEnabled = false;
+      let trailEnabled = false;
+
+      // === İz bırakma ===
+      const trail1 = new THREE.Group();
+      const trail2 = new THREE.Group();
+
+      function createTrail() {
+        for (let i = 0; i < 100; i++) {
+          const trailDot1 = new THREE.Mesh(new THREE.SphereGeometry(0.02), new THREE.MeshStandardMaterial({ color: 0x00ffff }));
+          trailDot1.position.set(0, 0, 0);
+          trail1.add(trailDot1);
+          
+          const trailDot2 = new THREE.Mesh(new THREE.SphereGeometry(0.02), new THREE.MeshStandardMaterial({ color: 0xffff00 }));
+          trailDot2.position.set(0, 0, 0);
+          trail2.add(trailDot2);
+        }
+        scene.add(trail1, trail2);
+      }
+
+      function updateTrail(x1, y1, x2, y2) {
+        for (let i = 0; i < 100; i++) {
+          const dot1 = trail1.children[i];
+          const dot2 = trail2.children[i];
+
+          if (i < 99) {
+            dot1.position.set(trail1.children[i + 1].position.x, trail1.children[i + 1].position.y, 0);
+            dot2.position.set(trail2.children[i + 1].position.x, trail2.children[i + 1].position.y, 0);
+          } else {
+            dot1.position.set(x1, y1, 0);
+            dot2.position.set(x2, y2, 0);
+          }
+        }
+      }
+
+      // === Animasyon döngüsü ===
+      function animate() {
+        renderer.setAnimationLoop(() => {
+          updatePendulum(0.016); // yaklaşık 60 FPS
+
+          const x1 = L1 * Math.sin(a1);
+          const y1 = -L1 * Math.cos(a1);
+          const x2 = x1 + L2 * Math.sin(a2);
+          const y2 = y1 - L2 * Math.cos(a2);
+
+          // Z eksenini kontrol et
+          if (zMovementEnabled) {
+            camera.position.z = 3 + Math.sin(Date.now() * 0.002) * 0.5;
+          }
+
+          // İz bırakma aktifse
+          if (trailEnabled) {
+            updateTrail(x1, y1, x2, y2);
+          }
+
+          // Rod ve bob hareketleri
+          rod1.position.set(x1 / 2, y1 / 2, 0);
+          rod1.rotation.z = a1;
+          rod2.position.set((x1 + x2) / 2, (y1 + y2) / 2, 0);
+          rod2.rotation.z = a2;
+          bob1.position.set(x1, y1, 0);
+          bob2.position.set(x2, y2, 0);
+
+          renderer.render(scene, camera);
+        });
+      }
+
+      // === UI Butonları ===
+      document.getElementById("toggleZ").addEventListener("click", () => {
+        zMovementEnabled = !zMovementEnabled;
+        document.getElementById("toggleZ").textContent = zMovementEnabled ? "Z Eksenini Kapat" : "Z Eksenini Aç";
+      });
+
+      document.getElementById("toggleTrail").addEventListener("click", () => {
+        trailEnabled = !trailEnabled;
+        document.getElementById("toggleTrail").textContent = trailEnabled ? "İz Bırakmayı Kapat" : "İz Bırakmayı Aç";
+      });
+
+      // İlk trail oluştur
+      createTrail();
+
+      animate();
+    </script>
+  </body>
+</html>
